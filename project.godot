@@ -30,7 +30,7 @@ window/size/always_on_top.release=false
 
 [editor_plugins]
 
-enabled=PackedStringArray("res://addons/debug_camera/plugin.cfg")
+enabled=PackedStringArray()
 
 [input]
 
