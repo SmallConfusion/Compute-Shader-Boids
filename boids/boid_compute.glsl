@@ -1,19 +1,7 @@
 #[compute]
 #version 450
 
-#define xp boids.data[gl_GlobalInvocationID.x * 4]
-#define yp boids.data[gl_GlobalInvocationID.x * 4 + 1]
-#define xv boids.data[gl_GlobalInvocationID.x * 4 + 2]
-#define yv boids.data[gl_GlobalInvocationID.x * 4 + 3]
-
-#define bxp(x) boids.data[x * 4]
-#define byp(x) boids.data[x * 4 + 1]
-#define bxv(x) boids.data[x * 4 + 2]
-#define byv(x) boids.data[x * 4 + 3]
-
-
-
-layout(local_size_x = 32, local_size_y = 1, local_size_z = 1) in;
+layout(local_size_x = 128, local_size_y = 1, local_size_z = 1) in;
 
 layout(set = 0, binding = 0, std430) restrict buffer Boids {
 	float data[];
@@ -21,7 +9,6 @@ layout(set = 0, binding = 0, std430) restrict buffer Boids {
 boids;
 
 layout(push_constant) uniform PushConstants {
-	float time;
 	int boid_count;
 	float separation;
 	float alignment;
@@ -36,11 +23,24 @@ layout(push_constant) uniform PushConstants {
 	float influence_dist;
 	float width;
 	float height;
+	float speed_variation;
 }
 pc;
 
 
 void main() {
+	float this_random = fract(sin(gl_GlobalInvocationID.x * 24.538904) * 48439.385955);
+	
+	vec2 pos = vec2(
+		boids.data[gl_GlobalInvocationID.x * 4],
+		boids.data[gl_GlobalInvocationID.x * 4 + 1]
+	);
+
+	vec2 vel = vec2(
+		boids.data[gl_GlobalInvocationID.x * 4 + 2],
+		boids.data[gl_GlobalInvocationID.x * 4 + 3]
+	);
+
 	vec2 separation_total = vec2(0);
 	vec2 alignment_total = vec2(0);
 	vec2 cohesion_total = vec2(0);
@@ -49,19 +49,23 @@ void main() {
 
 	for (int i = 0; i < pc.boid_count; i += 1) {
 		if (gl_GlobalInvocationID.x != i) {
-		
-			float rough_dist = max(abs(bxp(i) - xp), abs(byp(i) - yp));
-			
-			if (rough_dist < pc.influence_dist) {
-				vec2 this_pos = vec2(xp, yp);
-				vec2 other_pos = vec2(bxp(i), byp(i));
-				vec2 other_dir = vec2(bxv(i), byv(i));
+			vec2 other_pos = vec2(
+				boids.data[i * 4],
+				boids.data[i * 4 + 1]
+			);
 
-				float d = distance(this_pos, other_pos);
-				float influence = 1. - clamp(d / pc.influence_dist, 0, 1);
+			float dist_scaled = distance(pos, other_pos) / pc.influence_dist;
+
+			if (dist_scaled < 1.) {
+				vec2 other_vel = vec2(
+					boids.data[i * 4 + 2],
+					boids.data[i * 4 + 3]
+				);
+
+				float influence = 1. - dist_scaled;
 				
-				separation_total += normalize(this_pos - other_pos) * pow(influence, pc.ease_s);
-				alignment_total += normalize(other_dir) * influence * pow(influence, pc.ease_a);
+				separation_total += normalize(pos - other_pos) * pow(influence, pc.ease_s);
+				alignment_total += normalize(other_vel) * pow(influence, pc.ease_a);
 				cohesion_total += other_pos;
 
 				total += 1.;
@@ -69,9 +73,7 @@ void main() {
 		}
 	}
 
-	cohesion_total /= total;
-
-	cohesion_total = cohesion_total - vec2(xp, yp);
+	cohesion_total = cohesion_total / total - pos;
 
 	separation_total *= pc.separation;
 	alignment_total *= pc.alignment;
@@ -80,41 +82,31 @@ void main() {
 
 	vec2 movement_total = (separation_total + alignment_total + cohesion_total);
 
-	movement_total = normalize(movement_total) * pc.speed;
-
-	vec2 v = vec2(xv, yv);
+	float speed = pc.speed - pc.speed * this_random * pc.speed_variation;
+	movement_total = normalize(movement_total) * speed;
 	
-	v += movement_total;
-	v *= pc.friction;
+	vel += movement_total;
+	vel *= pc.friction;
 
 
-	if (xp <= pc.edge_padding) {
-		v.x += pc.edge_influence * (pc.edge_padding - xp);
-	}
+	vec2 d_to_max = vec2(pc.width, pc.height) - pos;
 
-	if (yp <= pc.edge_padding) {
-		v.y += pc.edge_influence * (pc.edge_padding - yp);
-	}
-
-	if (xp >= pc.width - pc.edge_padding) {
-		v.x -= pc.edge_influence * (pc.edge_padding - (pc.width - xp));
-	}
-
-	if (yp >= pc.height - pc.edge_padding) {
-		v.y -= pc.edge_influence * (pc.edge_padding - (pc.height - yp));
-	}
+	vec2 edge = max(1 - pos / pc.edge_padding, 0) +
+				min(d_to_max / pc.edge_padding, 1) - 1;
 
 
-
-	if (length(v) > pc.max_speed) {
-		v = normalize(v) * pc.max_speed;
-	}
+	vel += edge * pow(pc.edge_influence, 2);
 
 
-	xv = v.x;
-	yv = v.y;
+	float vel_len = length(vel);
+	float max_speed = pc.max_speed - pc.max_speed * this_random * pc.speed_variation;
 
-	// apply velocity
-	xp = clamp(xp + xv, 0, pc.width);
-	yp = clamp(yp + yv, 0, pc.height);
+	vel = vel / vel_len * min(vel_len, max_speed);
+
+	pos += vel;
+
+	boids.data[gl_GlobalInvocationID.x * 4] = pos.x;
+	boids.data[gl_GlobalInvocationID.x * 4 + 1] = pos.y;
+	boids.data[gl_GlobalInvocationID.x * 4 + 2] = vel.x;
+	boids.data[gl_GlobalInvocationID.x * 4 + 3] = vel.y;
 }

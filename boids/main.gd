@@ -1,7 +1,7 @@
 extends Node2D
 
-const boid_cluster_count := 1200
-const boid_cluster_size := 32
+@export var boid_cluster_count := 400
+const boid_cluster_size := 128
 
 var rd : RenderingDevice
 var shader : RID
@@ -28,23 +28,26 @@ var data : PackedByteArray
 
 @export var influence_dist := 50.
 
+@export var speed_variation := 0.
+
 @export var reset := false
-
-
-# Boid size 4
-
-# x
-# y
-# velocity x
-# velocity y
+@export var display := true
 
 
 func _ready() -> void:
+	print("Boid count: ", boid_cluster_count * boid_cluster_size)
+	
 	_setup_data()
 	_setup_compute()
 
 
 func _process(delta: float) -> void:
+	if Input.is_action_just_pressed("fullscreen"):
+		if DisplayServer.window_get_mode() == DisplayServer.WINDOW_MODE_FULLSCREEN:
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_WINDOWED)
+		else:
+			DisplayServer.window_set_mode(DisplayServer.WINDOW_MODE_FULLSCREEN)
+	
 	_sync_compute()
 	
 	if reset:
@@ -52,7 +55,9 @@ func _process(delta: float) -> void:
 		_setup_data()
 	
 	_run_compute()
-	queue_redraw()
+	
+	if display:
+		queue_redraw()
 
 
 func _draw() -> void:
@@ -61,14 +66,11 @@ func _draw() -> void:
 	var data_vec = PackedVector2Array([])
 	 
 	for i in boid_cluster_count * boid_cluster_size:
-		if i % 10 == 0:
-			draw_circle(Vector2(data_f[i * 4], data_f[i * 4 + 1]), 4, Color(1, 0, 1))
-		
 		var pos = Vector2(data_f[i * 4], data_f[i * 4 + 1])
 		var vel = Vector2(data_f[i * 4 + 2], data_f[i * 4 + 3])
 		
 		data_vec.append(pos)
-		data_vec.append(pos - vel)
+		data_vec.append(pos - vel.normalized() * 3)
 	
 	draw_multiline(data_vec, Color(1, 1, 1))
 
@@ -89,12 +91,11 @@ func _setup_data():
 
 	data = data_f.to_byte_array()
 
- 
+
 func _run_compute():
 	rd.buffer_update(buffer, 0, data.size(), data)
 	
 	var push_constants = \
-			PackedFloat32Array([Time.get_ticks_msec() / 1000.]).to_byte_array() + \
 			PackedInt32Array([boid_cluster_count * boid_cluster_size]).to_byte_array() + \
 			PackedFloat32Array([
 				separation,
@@ -109,7 +110,8 @@ func _run_compute():
 				edge_padding,
 				influence_dist,
 				get_window().size.x,
-				get_window().size.y, 0
+				get_window().size.y,
+				speed_variation, 0
 			]).to_byte_array()
 	
 	var compute_list := rd.compute_list_begin()
@@ -131,7 +133,7 @@ func _sync_compute():
 func _setup_compute():
 	rd = RenderingServer.create_local_rendering_device()
 	
-	var spriv := preload("res://2d_boids/boid_compute.glsl").get_spirv()
+	var spriv := preload("res://boids/boid_compute.glsl").get_spirv()
 	shader = rd.shader_create_from_spirv(spriv)
 	
 	uniform = RDUniform.new()
