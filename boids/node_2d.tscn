@@ -1,0 +1,16 @@
+[gd_scene load_steps=2 format=3 uid="uid://bk2knekoc2u78"]
+
+[ext_resource type="Script" path="res://boids/main.gd" id="1_qjc1f"]
+
+[node name="Node2D" type="Node2D"]
+script = ExtResource("1_qjc1f")
+separation = 41.305
+alignment = 4.75
+cohesion = 8.37
+speed = 0.2
+max_speed = 10.0
+friction = 0.964
+ease_separation = 3.94
+ease_alignment = 2.615
+edge_padding = 100.0
+edge_influence = 0.003
